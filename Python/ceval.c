@@ -722,6 +722,37 @@ Py_MakePendingCalls(void)
     return 0;
 }
 
+/* Dict watchers -- TODO copied from dictobject.c, remove if ceval stops
+   directly fiddling with dict internals. */
+
+/* If we're using GCC, use __builtin_expect() to reduce overhead of
+   the watched-dict checks */
+#if defined(__GNUC__) && (__GNUC__ > 2) && defined(__OPTIMIZE__)
+#  define UNLIKELY(value) __builtin_expect((value), 0)
+#  define LIKELY(value) __builtin_expect((value), 1)
+#else
+#  define UNLIKELY(value) (value)
+#  define LIKELY(value) (value)
+#endif
+
+static inline uint64_t
+notify_dict_event(PyDict_WatchEvent event,
+                  PyDictObject *mp,
+                  PyObject *key,
+                  PyObject *value)
+{
+    // Most dicts will not be watched.
+    if (UNLIKELY(mp->ma_version_tag & DICT_VERSION_WATCHED_TAG)) {
+        PyDict_WatchCallback callback = PyDict_GetWatchCallback();
+        // If a dict is watched, it is very likely someone installed a callback.
+        if (LIKELY(callback != NULL)) {
+            callback(event, (PyObject*)mp, key, value);
+        }
+        return DICT_NEXT_VERSION() | DICT_VERSION_WATCHED_TAG;
+    }
+    return DICT_NEXT_VERSION();
+}
+
 /* The interpreter's recursion limit */
 
 void
@@ -3595,6 +3626,7 @@ handle_eval_breaker:
             uint16_t hint = cache->index;
             DEOPT_IF(hint >= (size_t)dict->ma_keys->dk_nentries, STORE_ATTR);
             PyObject *value, *old_value;
+            uint64_t new_version;
             if (DK_IS_UNICODE(dict->ma_keys)) {
                 PyDictUnicodeEntry *ep = DK_UNICODE_ENTRIES(dict->ma_keys) + hint;
                 DEOPT_IF(ep->me_key != name, STORE_ATTR);
@@ -3602,6 +3634,7 @@ handle_eval_breaker:
                 DEOPT_IF(old_value == NULL, STORE_ATTR);
                 STACK_SHRINK(1);
                 value = POP();
+                new_version = notify_dict_event(PyDict_EVENT_MODIFIED, dict, name, value);
                 ep->me_value = value;
             }
             else {
@@ -3611,6 +3644,7 @@ handle_eval_breaker:
                 DEOPT_IF(old_value == NULL, STORE_ATTR);
                 STACK_SHRINK(1);
                 value = POP();
+                new_version = notify_dict_event(PyDict_EVENT_MODIFIED, dict, name, value);
                 ep->me_value = value;
             }
             Py_DECREF(old_value);
@@ -3620,7 +3654,7 @@ handle_eval_breaker:
                 _PyObject_GC_TRACK(dict);
             }
             /* PEP 509 */
-            dict->ma_version_tag = DICT_NEXT_VERSION();
+            dict->ma_version_tag = new_version;
             Py_DECREF(owner);
             JUMPBY(INLINE_CACHE_ENTRIES_STORE_ATTR);
             NOTRACE_DISPATCH();

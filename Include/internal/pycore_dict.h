@@ -160,8 +160,9 @@ struct _dictvalues {
 #define DK_IS_UNICODE(dk) ((dk)->dk_kind != DICT_KEYS_GENERAL)
 
 extern uint64_t _pydict_global_version;
+#define DICT_VERSION_WATCHED_TAG 1
 
-#define DICT_NEXT_VERSION() (++_pydict_global_version)
+#define DICT_NEXT_VERSION() (_pydict_global_version += 2)
 
 extern PyObject *_PyObject_MakeDictFromInstanceAttributes(PyObject *obj, PyDictValues *values);
 extern PyObject *_PyDict_FromItems(

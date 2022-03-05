@@ -76,3 +76,29 @@ typedef struct {
 
 PyAPI_FUNC(PyObject *) _PyDictView_New(PyObject *, PyTypeObject *);
 PyAPI_FUNC(PyObject *) _PyDictView_Intersect(PyObject* self, PyObject *other);
+
+/* Dictionary watchers */
+
+// Mark given dictionary as "watched" (callback will be called if it is modified)
+PyAPI_FUNC(void) PyDict_Watch(PyObject* dict);
+
+// Check if given dictionary is watched
+PyAPI_FUNC(int) PyDict_IsWatched(PyObject* dict);
+
+typedef enum {
+    PyDict_EVENT_CLEARED,
+    PyDict_EVENT_DEALLOCED,
+    PyDict_EVENT_MODIFIED,
+    PyDict_EVENT_CLONED,
+} PyDict_WatchEvent;
+
+// Callback to be invoked when a watched dict is cleared, dealloced, or modified.
+// In clear/dealloc case, key and new_value will be NULL. Otherwise, new_value will be the
+// new value for key, NULL if key is being deleted.
+typedef void(*PyDict_WatchCallback)(PyDict_WatchEvent event, PyObject* dict, PyObject* key, PyObject* new_value);
+
+// Set new global watch callback; supply NULL to clear callback
+PyAPI_FUNC(void) PyDict_SetWatchCallback(PyDict_WatchCallback callback);
+
+// Get existing global watch callback
+PyAPI_FUNC(PyDict_WatchCallback) PyDict_GetWatchCallback(void);

@@ -5775,6 +5775,191 @@ test_tstate_capi(PyObject *self, PyObject *Py_UNUSED(args))
 }
 
 
+// Test dict watching
+static PyObject *g_dict_watch_events;
+static PyDict_WatchCallback g_prev_callback;
+
+static void
+dict_watch_callback(PyDict_WatchEvent event,
+                    PyObject *dict,
+                    PyObject *key,
+                    PyObject *new_value)
+{
+    PyObject *msg;
+    switch(event) {
+        case PyDict_EVENT_CLEARED:
+            msg = PyUnicode_FromString("clear");
+            break;
+        case PyDict_EVENT_DEALLOCED:
+            msg = PyUnicode_FromString("dealloc");
+            break;
+        case PyDict_EVENT_CLONED:
+            msg = PyUnicode_FromString("clone");
+            break;
+        case PyDict_EVENT_MODIFIED:
+            if (new_value == NULL) {
+                msg = PyUnicode_FromFormat("del:%S", key);
+            } else {
+                msg = PyUnicode_FromFormat("set:%S:%S", key, new_value);
+            }
+            break;
+        default:
+            msg = PyUnicode_FromString("unknown");
+    }
+    assert(PyList_Check(g_dict_watch_events));
+    PyList_Append(g_dict_watch_events, msg);
+    if (g_prev_callback != NULL) {
+        g_prev_callback(event, dict, key, new_value);
+    }
+}
+
+static int
+dict_watch_assert(Py_ssize_t expected_num_events,
+                  const char *expected_last_msg)
+{
+    char buf[512];
+    Py_ssize_t actual_num_events = PyList_Size(g_dict_watch_events);
+    if (expected_num_events != actual_num_events) {
+        snprintf(buf,
+                 512,
+                 "got %ld dict watch events, expected %ld",
+                 actual_num_events,
+                 expected_num_events);
+        raiseTestError("test_watch_dict", (const char *)&buf);
+        return -1;
+    }
+    PyObject *last_msg = PyList_GetItem(g_dict_watch_events,
+                                        PyList_Size(g_dict_watch_events)-1);
+    if (PyUnicode_CompareWithASCIIString(last_msg, expected_last_msg)) {
+        snprintf(buf,
+                 512,
+                 "last event is '%s', expected '%s'",
+                 PyUnicode_AsUTF8(last_msg),
+                 expected_last_msg);
+        raiseTestError("test_watch_dict", (const char *)&buf);
+        return -1;
+    }
+    return 0;
+}
+
+static PyObject *
+test_watch_dict(PyObject *self, PyObject *Py_UNUSED(args))
+{
+    PyObject *watched = PyDict_New();
+    PyObject *unwatched = PyDict_New();
+    PyObject *one = PyLong_FromLong(1);
+    PyObject *two = PyLong_FromLong(2);
+    PyObject *key1 = PyUnicode_FromString("key1");
+    PyObject *key2 = PyUnicode_FromString("key2");
+
+    g_dict_watch_events = PyList_New(0);
+    g_prev_callback = PyDict_GetWatchCallback();
+
+    PyDict_SetWatchCallback(dict_watch_callback);
+    if (PyDict_GetWatchCallback() != dict_watch_callback) {
+        return raiseTestError("test_watch_dict", "GetWatchCallback did not return set callback");
+    }
+    PyDict_Watch(watched);
+
+    if (!PyDict_IsWatched(watched)) {
+        return raiseTestError("test_watch_dict", "IsWatched returned false for watched dict");
+    }
+    if (PyDict_IsWatched(unwatched)) {
+        return raiseTestError("test_watch_dict", "IsWatched returned true for unwatched dict");
+    }
+
+    PyDict_SetItem(unwatched, key1, two);
+    PyDict_Merge(watched, unwatched, 1);
+
+    if (dict_watch_assert(1, "clone")) {
+        return NULL;
+    }
+
+    PyDict_SetItem(watched, key1, one);
+    PyDict_SetItem(unwatched, key1, one);
+
+    if (dict_watch_assert(2, "set:key1:1")) {
+        return NULL;
+    }
+
+    PyDict_SetItemString(watched, "key1", two);
+    PyDict_SetItemString(unwatched, "key1", two);
+
+    if (dict_watch_assert(3, "set:key1:2")) {
+        return NULL;
+    }
+
+    PyDict_SetItem(watched, key2, one);
+    PyDict_SetItem(unwatched, key2, one);
+
+    if (dict_watch_assert(4, "set:key2:1")) {
+        return NULL;
+    }
+
+    _PyDict_Pop(watched, key2, Py_None);
+    _PyDict_Pop(unwatched, key2, Py_None);
+
+    if (dict_watch_assert(5, "del:key2")) {
+        return NULL;
+    }
+
+    PyDict_DelItemString(watched, "key1");
+    PyDict_DelItemString(unwatched, "key1");
+
+    if (dict_watch_assert(6, "del:key1")) {
+        return NULL;
+    }
+
+    PyDict_SetDefault(watched, key1, one);
+    PyDict_SetDefault(unwatched, key1, one);
+
+    if (dict_watch_assert(7, "set:key1:1")) {
+        return NULL;
+    }
+
+
+    PyDict_Clear(watched);
+    PyDict_Clear(unwatched);
+
+    if (dict_watch_assert(8, "clear")) {
+        return NULL;
+    }
+
+    PyObject *copy = PyDict_Copy(watched);
+    if (PyDict_IsWatched(copy)) {
+        return raiseTestError("test_watch_dict", "copying a watched dict should not watch the copy");
+    }
+    Py_CLEAR(copy);
+
+    Py_CLEAR(watched);
+    Py_CLEAR(unwatched);
+
+    if (dict_watch_assert(9, "dealloc")) {
+        return NULL;
+    }
+
+
+    PyDict_SetWatchCallback(g_prev_callback);
+    g_prev_callback = NULL;
+    // no events after callback unset
+    watched = PyDict_New();
+    PyDict_Watch(watched);
+    PyDict_SetItem(watched, key1, one);
+    Py_CLEAR(watched);
+
+    if (dict_watch_assert(9, "dealloc")) {
+        return NULL;
+    }
+
+    Py_CLEAR(g_dict_watch_events);
+    Py_DECREF(one);
+    Py_DECREF(two);
+    Py_DECREF(key1);
+    Py_DECREF(key2);
+    Py_RETURN_NONE;
+}
+
+
 static PyObject *negative_dictoffset(PyObject *, PyObject *);
 static PyObject *test_buildvalue_issue38913(PyObject *, PyObject *);
 static PyObject *getargs_s_hash_int(PyObject *, PyObject *, PyObject*);
@@ -6061,6 +6246,7 @@ static PyMethodDef TestMethods[] = {
      PyDoc_STR("fatal_error(message, release_gil=False): call Py_FatalError(message)")},
     {"type_get_version", type_get_version, METH_O, PyDoc_STR("type->tp_version_tag")},
     {"test_tstate_capi", test_tstate_capi, METH_NOARGS, NULL},
+    {"test_watch_dict", test_watch_dict, METH_NOARGS, NULL},
     {NULL, NULL} /* sentinel */
 };
 

@@ -238,3 +238,54 @@ Dictionary Objects
           for key, value in seq2:
               if override or key not in a:
                   a[key] = value
+
+.. c:function:: void PyDict_Watch(PyObject *dict)
+
+   Mark dictionary *dict* as watched. The callback set via
+   :c:func:`PyDict_SetWatchCallback` will be called when *dict* is modified or
+   deallocated.
+
+.. c:function:: int PyDict_IsWatched(PyObject *dict)
+
+   Return ``1`` if *dict* is marked as watched, ``0`` otherwise.
+
+.. c:type:: PyDict_WatchEvent
+
+   Enumeration of possible dictionary watcher events: ``PyDict_EVENT_MODIFIED``,
+   ``PyDict_EVENT_CLONED``, ``PyDict_EVENT_CLEARED``, or ``PyDict_EVENT_DEALLOCED``.
+
+.. c:type:: void (*PyDict_WatchCallback)(PyDict_WatchEvent event, PyObject *dict, PyObject *key, PyObject *new_value)
+
+   Type of a dict watcher callback function.
+
+   If *event* is ``PyDict_EVENT_CLEARED`` or ``PyDict_EVENT_DEALLOCED``, both
+   *key* and *new_value* will be ``NULL``. If ``event`` is
+   ``PyDict_EVENT_MODIFIED``, new_value will be the new value for *key*, or
+   ``NULL`` if *key* is being deleted from the dictionary.
+
+   ``PyDict_EVENT_CLONED`` occurs when *dict* was previously empty and another
+   dict is merged into it. To maintain efficiency of this operation, per-key
+   ``PyDict_EVENT_MODIFIED`` events are not issued in this case; instead a
+   single ``PyDict_EVENT_CLONED`` is issued, and *key* will be the source
+   dictionary.
+
+.. c:function:: void PyDict_SetWatchCallback(PyDict_WatchCallback callback)
+
+   Set a callback for modification events on dictionaries watched via
+   :c:func:`PyDict_Watch`.
+
+   There is only one callback per interpreter. Before setting the callback, you
+   must check if there is one already set (use
+   :c:func:`PyDict_GetWatchCallback`) and if so, call it from your own new
+   callback. Failure to do this is a critical bug in your callback and may break
+   other dict-watching clients.
+
+   The callback may inspect but should not modify *dict*; doing so could have
+   unpredictable effects, including infinite recursion.
+
+   Callbacks occur before the notified modification to *dict* takes place, so
+   the prior state of *dict* can be inspected.
+
+.. c:function:: PyDict_WatchCallback PyDict_GetWatchCallback(void)
+
+   Return the existing dictionary watcher callback, or ``NULL`` if none has been set.

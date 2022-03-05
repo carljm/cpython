@@ -147,6 +147,8 @@ struct _is {
     // Initialized to _PyEval_EvalFrameDefault().
     _PyFrameEvalFunction eval_frame;
 
+    void *dict_watch_callback;
+
     Py_ssize_t co_extra_user_count;
     freefunc co_extra_freefuncs[MAX_CO_EXTRA_USERS];
 
