@@ -114,6 +114,7 @@ PyModule_NewObject(PyObject *name)
         return NULL;
     if (module_init_dict(m, m->md_dict, name, NULL) != 0)
         goto fail;
+    PyDict_Watch(m->md_dict);
     PyObject_GC_Track(m);
     return (PyObject *)m;
 
